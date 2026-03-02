@@ -1,0 +1,67 @@
+from fastapi import APIRouter, Depends, HTTPException
+from app.models.schemas import SymptomInput, PredictionResponse
+from app.ml.disease_predictor import predictor
+from app.ml.recommendation_engine import recommender
+from app.routes.auth import get_current_user
+from app.database.core import get_database
+from loguru import logger
+from datetime import datetime
+import uuid
+
+router = APIRouter()
+
+@router.get("/symptoms")
+async def get_symptoms():
+    if predictor.symptoms_list:
+        # Prettify symptoms: replace underscores with spaces and capitalize
+        symptoms = [sym.replace('_', ' ').title() for sym in predictor.symptoms_list]
+        return {"symptoms": symptoms}
+    return {"symptoms": []}
+
+@router.post("/predict", response_model=PredictionResponse)
+async def predict_disease(input_data: SymptomInput, current_user: dict = Depends(get_current_user)):
+    try:
+        # Load user history and allergies to context
+        user_context = {
+            "allergies": current_user.get("allergies", []),
+            "age": current_user.get("age")
+        }
+        
+        # 1. Predict Disease
+        prediction_result = predictor.predict(input_data.symptoms)
+        disease_name = prediction_result["disease"]
+        
+        # 2. Get Recommendations
+        recommendations = await recommender.get_recommendations(disease_name, user_context=user_context)
+        
+        # 3. Log the prediction
+        db = get_database()
+        log_entry = {
+            "log_id": str(uuid.uuid4()),
+            "user_id": current_user["id"],
+            "symptoms": input_data.symptoms,
+            "predicted_disease": disease_name,
+            "confidence": prediction_result["confidence"],
+            "timestamp": datetime.utcnow()
+        }
+        await db.prediction_logs.insert_one(log_entry)
+        
+        # Check emergency flag
+        risk_score = prediction_result["risk_score"]
+        if prediction_result["confidence"] > 0.9 and any("severe" in sym.lower() for sym in input_data.symptoms):
+            risk_score = "Emergency"
+            logger.warning(f"EMERGENCY FLAG triggered for user {current_user['email']} due to severe symptoms!")
+
+        return PredictionResponse(
+            predicted_disease=disease_name,
+            confidence_score=prediction_result["confidence"],
+            risk_score=risk_score,
+            recommended_medicines=recommendations.get("medications", []),
+            precautions=recommendations.get("precautions", []),
+            diet=recommendations.get("diets", []),
+            workout=recommendations.get("workouts", []),
+            shap_explanation=prediction_result.get("shap_explanation", {})
+        )
+    except Exception as e:
+        logger.error(f"Prediction error: {e}")
+        raise HTTPException(status_code=500, detail=f"Error performing prediction: {str(e)}")
