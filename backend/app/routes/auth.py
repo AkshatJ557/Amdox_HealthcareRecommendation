@@ -32,6 +32,17 @@ async def get_analyst_user(current_user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Analyst or Admin access required")
     return current_user
 
+def role_required(allowed_roles: list):
+    """Dependency generator checking for multiple roles"""
+    async def role_checker(current_user: dict = Depends(get_current_user)):
+        if current_user.get("role") not in allowed_roles:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, 
+                detail=f"Operation not permitted. Required roles: {', '.join(allowed_roles)}"
+            )
+        return current_user
+    return role_checker
+
 @router.post("/register", response_model=UserResponse)
 async def register(user: UserCreate):
     db = get_database()

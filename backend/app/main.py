@@ -2,7 +2,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from app.database.core import connect_to_mongo, close_mongo_connection
-from app.routes import auth, predict, recovery, analytics
+from app.routes import auth, predict, recovery, analytics, predictions
 from app.ml.recommendation_engine import recommender
 from loguru import logger
 
@@ -43,6 +43,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 app.include_router(auth.router, prefix="/auth", tags=["Authentication"])
 app.include_router(predict.router, prefix="/api", tags=["Prediction"])
+app.include_router(predictions.router, prefix="/api/predictions", tags=["Prediction History"])
 app.include_router(recovery.router, prefix="/api", tags=["Recovery"])
 app.include_router(analytics.router, prefix="/api/analytics", tags=["Analytics"])
 

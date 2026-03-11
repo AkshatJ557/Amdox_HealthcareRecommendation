@@ -57,6 +57,17 @@ export const predictionService = {
     predictDisease: async (symptoms: string[]) => {
         const response = await api.post('/api/predict', { symptoms });
         return response.data;
+    },
+    getHistory: async (status?: string) => {
+        const url = status ? `/api/predictions?status=${status}` : '/api/predictions';
+        const response = await api.get(url);
+        return response.data;
+    },
+    updateStatus: async (id: string, status: string, feedback?: string) => {
+        const response = await api.patch(`/api/predictions/${id}/status`, null, {
+            params: { status, feedback }
+        });
+        return response.data;
     }
 };
 
@@ -108,6 +119,10 @@ export const analyticsService = {
     },
     getAnalystSeverityHeatmap: async () => {
         const response = await api.get('/api/analytics/analyst/severity-heatmap');
+        return response.data;
+    },
+    getAnalystPredictionsVsReviews: async () => {
+        const response = await api.get('/api/analytics/analyst/predictions-vs-reviews');
         return response.data;
     }
 };

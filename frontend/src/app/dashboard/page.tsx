@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { authService, predictionService, analyticsService, recoveryService } from '@/services/api';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, CartesianGrid } from 'recharts';
-import { AlertTriangle, Activity, Pill, Apple, Dumbbell, ShieldAlert, ShieldCheck, Search, X, ChevronDown, Clock, HeartPulse } from 'lucide-react';
+import { AlertTriangle, Activity, Pill, Apple, Dumbbell, ShieldAlert, ShieldCheck, Search, X, ChevronDown, Clock, HeartPulse, History, MessageSquare } from 'lucide-react';
 
 export default function Dashboard() {
     const router = useRouter();
@@ -15,6 +15,7 @@ export default function Dashboard() {
     const [loading, setLoading] = useState(false);
     const [result, setResult] = useState<any>(null);
     const [error, setError] = useState('');
+    const [predictionHistory, setPredictionHistory] = useState<any[]>([]);
 
     // Recovery & Timeline State
     const [timeline, setTimeline] = useState<any>(null);
@@ -43,10 +44,14 @@ export default function Dashboard() {
 
         const fetchTimeline = async () => {
             try {
-                const data = await analyticsService.getPatientTimeline();
+                const [data, histData] = await Promise.all([
+                    analyticsService.getPatientTimeline(),
+                    predictionService.getHistory()
+                ]);
                 setTimeline(data);
-                if (data.predictions_history && data.predictions_history.length > 0) {
-                    setRecoveryForm(prev => ({ ...prev, disease: data.predictions_history[0].disease }));
+                setPredictionHistory(histData || []);
+                if (histData && histData.length > 0) {
+                    setRecoveryForm(prev => ({ ...prev, disease: histData[0].predicted_disease }));
                 }
             } catch (err) {
                 console.error("Failed to fetch timeline", err);
@@ -68,10 +73,14 @@ export default function Dashboard() {
             setResult(data);
 
             // Refresh patient timeline after a new prediction so the graph updates immediately
-            const timelineData = await analyticsService.getPatientTimeline();
+            const [timelineData, histData] = await Promise.all([
+                analyticsService.getPatientTimeline(),
+                predictionService.getHistory()
+            ]);
             setTimeline(timelineData);
-            if (timelineData.predictions_history && timelineData.predictions_history.length > 0) {
-                setRecoveryForm(prev => ({ ...prev, disease: timelineData.predictions_history[0].disease }));
+            setPredictionHistory(histData || []);
+            if (histData && histData.length > 0) {
+                setRecoveryForm(prev => ({ ...prev, disease: histData[0].predicted_disease }));
             }
         } catch (err: any) {
             setError(err.response?.data?.detail || 'Prediction failed. Please try again.');
@@ -494,9 +503,9 @@ export default function Dashboard() {
                                                     className="w-full px-4 py-2 bg-slate-50 border border-slate-300 text-slate-900 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
                                                 >
                                                     <option value="" disabled>Select a diagnosed disease...</option>
-                                                    {timeline?.predictions_history?.length > 0 ? (
-                                                        Array.from(new Set(timeline.predictions_history.map((p: any) => p.disease))).map((disease: any) => (
-                                                            <option key={disease} value={disease}>{disease}</option>
+                                                    {predictionHistory.length > 0 ? (
+                                                        Array.from(new Set(predictionHistory.map((p: any) => p.predicted_disease))).map((disease: any) => (
+                                                            <option className="capitalize" key={disease} value={disease}>{disease}</option>
                                                         ))
                                                     ) : (
                                                         <option value="" disabled>No predictions yet. Predict first.</option>
@@ -568,6 +577,70 @@ export default function Dashboard() {
                                         </form>
                                     )}
                                 </div>
+                            </div>
+                        </div>
+
+                        {/* Complete Prediction History */}
+                        <div className="mt-8 bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                            <div className="p-6 border-b border-slate-200">
+                                <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                                    <History className="w-5 h-5 text-indigo-500" />
+                                    My Diagnosis Records
+                                </h3>
+                            </div>
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-left border-collapse">
+                                    <thead>
+                                        <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 text-sm">
+                                            <th className="px-6 py-4 font-medium">Date</th>
+                                            <th className="px-6 py-4 font-medium">Predicted Disease</th>
+                                            <th className="px-6 py-4 font-medium">Risk Score</th>
+                                            <th className="px-6 py-4 font-medium">Symptoms Investigated</th>
+                                            <th className="px-6 py-4 font-medium">Status & Feedback</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {predictionHistory.map((p: any, i: number) => (
+                                            <tr key={i} className="border-b border-slate-100 hover:bg-slate-50">
+                                                <td className="px-6 py-4 text-sm text-slate-500">{new Date(p.created_at).toLocaleDateString()}</td>
+                                                <td className="px-6 py-4 font-bold text-indigo-600 capitalize">{p.predicted_disease}</td>
+                                                <td className="px-6 py-4">
+                                                    <span className={`px-2 py-1 rounded text-xs font-medium ${p.risk_score === 'High' || p.risk_score === 'Emergency' ? 'bg-red-100 text-red-700' :
+                                                        p.risk_score === 'Medium' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'
+                                                        }`}>
+                                                        {p.risk_score}
+                                                    </span>
+                                                </td>
+                                                <td className="px-6 py-4 text-sm text-slate-500 capitalize max-w-xs truncate" title={p.symptoms.join(', ')}>
+                                                    {p.symptoms.join(', ')}
+                                                </td>
+                                                <td className="px-6 py-4">
+                                                    <div className="flex flex-col gap-1">
+                                                        <div className="flex items-center gap-1">
+                                                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${p.status === 'Reviewed' ? 'bg-blue-100 text-blue-700' : p.status === 'Removed' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
+                                                                }`}>
+                                                                {p.status}
+                                                            </span>
+                                                        </div>
+                                                        {p.analyst_feedback && (
+                                                            <div className="flex items-start gap-1.5 mt-2 bg-blue-50 p-3 rounded-lg border border-blue-100 shadow-sm cursor-text selection:bg-blue-200">
+                                                                <MessageSquare className="w-3.5 h-3.5 text-blue-500 flex-shrink-0 mt-0.5" />
+                                                                <p className="text-xs text-blue-800 break-words w-full">
+                                                                    {p.analyst_feedback}
+                                                                </p>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                        {predictionHistory.length === 0 && (
+                                            <tr>
+                                                <td colSpan={5} className="px-6 py-8 text-center text-slate-400">No predictions recorded yet. Follow the steps above!</td>
+                                            </tr>
+                                        )}
+                                    </tbody>
+                                </table>
                             </div>
                         </div>
                     </div>

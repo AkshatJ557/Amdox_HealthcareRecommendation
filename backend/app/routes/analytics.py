@@ -18,7 +18,7 @@ async def get_disease_distribution(current_user: dict = Depends(get_analyst_user
             {"$group": {"_id": "$predicted_disease", "count": {"$sum": 1}}},
             {"$sort": {"count": -1}}
         ]
-        result = await db.prediction_logs.aggregate(pipeline).to_list(length=100)
+        result = await db.predictions.aggregate(pipeline).to_list(length=100)
         return [{"disease": r["_id"].title(), "count": r["count"]} for r in result if r["_id"]]
     except Exception as e:
         logger.error(f"Error fetching disease distribution: {e}")
@@ -57,7 +57,7 @@ async def get_disease_trend(current_user: dict = Depends(get_analyst_user)):
             {
                 "$group": {
                     "_id": {
-                        "date": {"$dateToString": {"format": "%Y-%m-%d", "date": "$timestamp"}},
+                        "date": {"$dateToString": {"format": "%Y-%m-%d", "date": "$created_at"}},
                         "disease": "$predicted_disease"
                     },
                     "count": {"$sum": 1}
@@ -65,14 +65,15 @@ async def get_disease_trend(current_user: dict = Depends(get_analyst_user)):
             },
             {"$sort": {"_id.date": 1}}
         ]
-        results = await db.prediction_logs.aggregate(pipeline).to_list(length=1000)
+        results = await db.predictions.aggregate(pipeline).to_list(length=1000)
         
         # Restructure for Recharts Multi-line
         trend_data = {}
         diseases = set()
         for r in results:
+            if not r["_id"]["date"]: continue
             date = r["_id"]["date"]
-            disease = r["_id"]["disease"].title()
+            disease = r["_id"]["disease"].title() if r["_id"]["disease"] else "Unknown"
             count = r["count"]
             diseases.add(disease)
             
@@ -138,13 +139,13 @@ async def get_prediction_volume(current_user: dict = Depends(get_analyst_user)):
         pipeline = [
             {
                 "$group": {
-                    "_id": {"$dateToString": {"format": "%Y-%m-%d", "date": "$timestamp"}},
+                    "_id": {"$dateToString": {"format": "%Y-%m-%d", "date": "$created_at"}},
                     "count": {"$sum": 1}
                 }
             },
             {"$sort": {"_id": 1}}
         ]
-        results = await db.prediction_logs.aggregate(pipeline).to_list(length=300)
+        results = await db.predictions.aggregate(pipeline).to_list(length=300)
         return [{"date": r["_id"], "predictions": r["count"]} for r in results if r["_id"]]
     except Exception as e:
         logger.error(f"Error fetching prediction volume: {e}")
@@ -163,12 +164,13 @@ async def get_severity_heatmap(current_user: dict = Depends(get_analyst_user)):
                 }
             }
         ]
-        results = await db.prediction_logs.aggregate(pipeline).to_list(length=500)
+        results = await db.predictions.aggregate(pipeline).to_list(length=500)
         
         heatmap_data = {}
         for r in results:
+            if not r["_id"]["disease"]: continue
             disease = r["_id"]["disease"].title()
-            risk = r["_id"]["risk"]
+            risk = r["_id"]["risk"] or "Low"
             count = r["count"]
             
             if disease not in heatmap_data:
@@ -178,6 +180,24 @@ async def get_severity_heatmap(current_user: dict = Depends(get_analyst_user)):
         return list(heatmap_data.values())
     except Exception as e:
         logger.error(f"Error fetching severity heatmap: {e}")
+        return []
+
+@router.get("/analyst/predictions-vs-reviews")
+async def get_predictions_vs_reviews(current_user: dict = Depends(get_analyst_user)):
+    """H. Predictions vs Reviews (Bar Chart)"""
+    try:
+        db = get_database()
+        pending = await db.predictions.count_documents({"status": "Pending"})
+        reviewed = await db.predictions.count_documents({"status": "Reviewed"})
+        removed = await db.predictions.count_documents({"status": "Removed"})
+        
+        return [
+            {"name": "Pending", "count": pending},
+            {"name": "Reviewed", "count": reviewed},
+            {"name": "Removed", "count": removed}
+        ]
+    except Exception as e:
+        logger.error(f"Error fetching predictions vs reviews: {e}")
         return []
 
 # ---------------------------------------------------------
@@ -190,15 +210,15 @@ async def get_admin_system_stats(current_user: dict = Depends(get_admin_user)):
     try:
         db = get_database()
         total_users = await db.users.count_documents({})
-        total_predictions = await db.prediction_logs.count_documents({})
+        total_predictions = await db.predictions.count_documents({})
         
         # Active vs Inactive (Simplification: Active has prediction in last 7 days)
         seven_days_ago = datetime.utcnow() - timedelta(days=7)
         active_pipeline = [
-            {"$match": {"timestamp": {"$gte": seven_days_ago}}},
+            {"$match": {"created_at": {"$gte": seven_days_ago}}},
             {"$group": {"_id": "$user_id"}}
         ]
-        active_users_ids = await db.prediction_logs.aggregate(active_pipeline).to_list(length=None)
+        active_users_ids = await db.predictions.aggregate(active_pipeline).to_list(length=None)
         active_count = len(active_users_ids)
         inactive_count = total_users - active_count
         
@@ -213,8 +233,8 @@ async def get_admin_system_stats(current_user: dict = Depends(get_admin_user)):
             {"$sort": {"count": -1}},
             {"$limit": 5}
         ]
-        top_diseases = await db.prediction_logs.aggregate(disease_pipeline).to_list(length=5)
-        top_diseases_formatted = [{"disease": d["_id"].title(), "count": d["count"]} for d in top_diseases]
+        top_diseases = await db.predictions.aggregate(disease_pipeline).to_list(length=5)
+        top_diseases_formatted = [{"disease": d["_id"].title() if d["_id"] else "Unknown", "count": d["count"]} for d in top_diseases]
 
         return {
             "total_users": total_users,
@@ -234,9 +254,9 @@ async def get_admin_users_list(current_user: dict = Depends(get_admin_user)):
         
         # Get prediction counts per user
         prediction_pipeline = [
-            {"$group": {"_id": "$user_id", "prediction_count": {"$sum": 1}, "last_prediction": {"$max": "$timestamp"}}}
+            {"$group": {"_id": "$user_id", "prediction_count": {"$sum": 1}, "last_prediction": {"$max": "$created_at"}}}
         ]
-        user_stats = await db.prediction_logs.aggregate(prediction_pipeline).to_list(length=None)
+        user_stats = await db.predictions.aggregate(prediction_pipeline).to_list(length=None)
         stats_map = {stat["_id"]: stat for stat in user_stats}
         
         users = await db.users.find({}, {"hashed_password": 0}).to_list(length=100) # limit for now
@@ -272,16 +292,17 @@ async def get_admin_login_times(current_user: dict = Depends(get_admin_user)):
         pipeline = [
             {
                 "$group": {
-                    "_id": {"$hour": "$timestamp"},
+                    "_id": {"$hour": "$created_at"},
                     "count": {"$sum": 1}
                 }
             },
             {"$sort": {"_id": 1}}
         ]
-        results = await db.prediction_logs.aggregate(pipeline).to_list(length=24)
+        results = await db.predictions.aggregate(pipeline).to_list(length=24)
         hours = {i: 0 for i in range(24)}
         for r in results:
-            hours[r["_id"]] = r["count"]
+            if r["_id"] is not None:
+                hours[r["_id"]] = r["count"]
             
         return [{"hour": f"{h:02d}:00", "count": c} for h, c in hours.items()]
     except Exception as e:
@@ -300,17 +321,17 @@ async def get_patient_timeline(current_user: dict = Depends(get_current_user)):
         user_id = current_user["id"]
         
         # Predictions
-        predictions = await db.prediction_logs.find({"user_id": user_id}).sort("timestamp", -1).to_list(length=50)
+        predictions = await db.predictions.find({"user_id": user_id}).sort("created_at", -1).to_list(length=50)
         
         trend = []
         formatted_preds = []
         risk_weights = {"Low": 1, "Medium": 2, "High": 3, "Emergency": 4}
         
         for p in predictions:
-            date_str = p["timestamp"].strftime("%Y-%m-%d") if p.get("timestamp") else "Unknown"
+            date_str = p["created_at"].strftime("%Y-%m-%d") if p.get("created_at") else "Unknown"
             formatted_preds.append({
                 "date": date_str,
-                "disease": p.get("predicted_disease").title(),
+                "disease": p.get("predicted_disease", "Unknown").title(),
                 "risk": p.get("risk_score"),
                 "confidence": p.get("confidence")
             })
@@ -330,7 +351,7 @@ async def get_patient_timeline(current_user: dict = Depends(get_current_user)):
             date_str = r["submitted_at"].strftime("%Y-%m-%d") if r.get("submitted_at") else "Unknown"
             formatted_recoveries.append({
                 "date": date_str,
-                "disease": r.get("disease").title(),
+                "disease": r.get("disease", "Unknown").title(),
                 "medication": r.get("medication"),
                 "status": r.get("recovery_status"),
             })

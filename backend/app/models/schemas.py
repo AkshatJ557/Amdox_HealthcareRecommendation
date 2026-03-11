@@ -64,3 +64,22 @@ class RecoveryStatusInDB(RecoveryStatusCreate):
     id: str
     user_id: str
     submitted_at: datetime
+
+class PredictionHistoryCreate(BaseModel):
+    user_id: str
+    user_name: Optional[str] = None
+    symptoms: List[str]
+    predicted_disease: str
+    confidence_score: float
+    risk_score: str
+    recommended_medicines: List[str]
+    precautions: List[str]
+    diet: List[str]
+    workout: List[str]
+    shap_explanation: Optional[Dict[str, Any]] = None
+
+class PredictionHistory(PredictionHistoryCreate):
+    id: Optional[str] = None
+    status: str = "Pending"  # Pending, Reviewed
+    analyst_feedback: Optional[str] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)

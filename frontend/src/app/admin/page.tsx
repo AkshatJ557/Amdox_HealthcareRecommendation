@@ -1,9 +1,9 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { authService, analyticsService } from '@/services/api';
+import { authService, analyticsService, predictionService } from '@/services/api';
 import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from 'recharts';
-import { Users, Activity, ShieldCheck, Search, ChevronLeft, ChevronRight, Server, AlertTriangle } from 'lucide-react';
+import { Users, Activity, ShieldCheck, Search, ChevronLeft, ChevronRight, Server, AlertTriangle, ListChecks } from 'lucide-react';
 
 export default function AdminDashboard() {
     const router = useRouter();
@@ -11,6 +11,7 @@ export default function AdminDashboard() {
     const [stats, setStats] = useState<any>(null);
     const [users, setUsers] = useState<any[]>([]);
     const [loginTimes, setLoginTimes] = useState<any[]>([]);
+    const [predictionsList, setPredictionsList] = useState<any[]>([]); // New state mapped mapping
     const [loading, setLoading] = useState(true);
 
     // Table Pagination & Search
@@ -28,15 +29,17 @@ export default function AdminDashboard() {
                 }
                 setUser(userData);
 
-                const [statsData, usersData, loginData] = await Promise.all([
+                const [statsData, usersData, loginData, predictionsData] = await Promise.all([
                     analyticsService.getAdminStats(),
                     analyticsService.getAdminUsers(),
-                    analyticsService.getAdminLoginTimes()
+                    analyticsService.getAdminLoginTimes(),
+                    predictionService.getHistory()
                 ]);
 
                 setStats(statsData);
                 setUsers(usersData.users || []);
                 setLoginTimes(loginData || []);
+                setPredictionsList(predictionsData || []);
             } catch (err) {
                 router.push('/login');
             } finally {
@@ -277,6 +280,58 @@ export default function AdminDashboard() {
                             </div>
                         </div>
                     )}
+                </div>
+
+                {/* Predictions History Table Layer */}
+                <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden mt-8">
+                    <div className="p-6 border-b border-slate-200">
+                        <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                            <ListChecks className="w-5 h-5 text-indigo-500" />
+                            All Platform Predictions
+                        </h3>
+                    </div>
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-left border-collapse">
+                            <thead>
+                                <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 text-sm">
+                                    <th className="px-6 py-4 font-medium">User Name</th>
+                                    <th className="px-6 py-4 font-medium">Predicted Disease</th>
+                                    <th className="px-6 py-4 font-medium">Risk Score</th>
+                                    <th className="px-6 py-4 font-medium text-center">Status</th>
+                                    <th className="px-6 py-4 font-medium text-right">Date</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {predictionsList.slice(0, 50).map((p: any, i: number) => (
+                                    <tr key={i} className="border-b border-slate-100 hover:bg-slate-50">
+                                        <td className="px-6 py-4 font-medium text-slate-900 text-sm">{p.user_name || p.user_id}</td>
+                                        <td className="px-6 py-4 font-bold text-indigo-600 capitalize">{p.predicted_disease}</td>
+                                        <td className="px-6 py-4">
+                                            <span className={`px-2 py-1 rounded text-xs font-medium ${p.risk_score === 'High' || p.risk_score === 'Emergency' ? 'bg-red-100 text-red-700' :
+                                                p.risk_score === 'Medium' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'
+                                                }`}>
+                                                {p.risk_score}
+                                            </span>
+                                        </td>
+                                        <td className="px-6 py-4 text-center">
+                                            <span className={`px-2 py-1 rounded-full text-xs font-bold ${p.status === 'Reviewed' ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-600'
+                                                }`}>
+                                                {p.status}
+                                            </span>
+                                        </td>
+                                        <td className="px-6 py-4 text-right text-sm text-slate-500">
+                                            {new Date(p.created_at).toLocaleDateString()}
+                                        </td>
+                                    </tr>
+                                ))}
+                                {predictionsList.length === 0 && (
+                                    <tr>
+                                        <td colSpan={5} className="px-6 py-8 text-center text-slate-400">No predictions found in the database.</td>
+                                    </tr>
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
 
             </div>
